@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تطوع - منصة إدارة وتنسيق الحملات التطوعية</title>
+    <!-- خطوط Google Fonts والأيقونات -->
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- مكتبة الرسوم البيانية Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- ربط ملف التصميم الخارجي -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- الواجهة الأولى (تحتوي على خانتي: تسجيل الدخول أو إنشاء حساب جديد) -->
+    <div id="auth-screen">
+        <div class="auth-card">
+            <i class="fa-solid fa-hands-holding-child" style="font-size: 42px; color: #0d9488; margin-bottom: 10px;"></i>
+            <h2>منصة تَطَوُّع</h2>
+            <p>البوابة الوطنية الموحدة لإدارة وتنسيق الحملات التطوعية</p>
+            
+            <!-- أزرار التبديل بين الخانتين -->
+            <div class="auth-tabs-toggle">
+                <button type="button" id="tab-login-btn" class="auth-tab-btn active" onclick="switchAuthTab('login')">لديك حساب سابق؟</button>
+                <button type="button" id="tab-register-btn" class="auth-tab-btn" onclick="switchAuthTab('register')">حساب جديد</button>
+            </div>
+
+            <!-- الخانة الأولى: تسجيل الدخول لحساب سابق -->
+            <div id="auth-login-section" class="auth-section active">
+                <form id="login-form" onsubmit="handleLogin(event)">
+                    <div class="form-group">
+                        <label>البريد الإلكتروني</label>
+                        <input type="email" id="login-email" placeholder="name@example.com" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>كلمة السر</label>
+                        <input type="password" id="login-password" placeholder="أدخل كلمة السر الخاصة بك" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>نوع الحساب</label>
+                        <select id="login-role" onchange="toggleLoginPassword()">
+                            <option value="volunteer">متطوع / متطوعة</option>
+                            <option value="admin">مشرف المنصة</option>
+                        </select>
+                    </div>
+
+                    <!-- خانة كلمة سر المشرف الخاصة -->
+                    <div class="form-group" id="admin-secret-group" style="display: none;">
+                        <label style="color: #ef4444;">كلمة سر المشرف السرية</label>
+                        <input type="password" id="admin-secret-input" placeholder="أدخل كلمة السر الخاصة بالمشرفين">
+                    </div>
+                    
+                    <button type="submit" class="btn">تسجيل الدخول</button>
+                    
+                    <div style="margin-top: 12px; text-align: center;">
+                        <a onclick="forgotPassword()" style="color: var(--primary); cursor: pointer; font-size: 13px; text-decoration: underline;">نسيت كلمة السر؟</a>
+                    </div>
+                </form>
+            </div>
+
+            <!-- الخانة الثانية: تسجيل حساب جديد -->
+            <div id="auth-register-section" class="auth-section" style="display: none;">
+                <form id="register-form" onsubmit="handleAuthRegister(event)">
+                    <div class="form-group">
+                        <label>الاسم</label>
+                        <input type="text" id="auth-reg-firstname" placeholder="مثال: محمد" required>
+                    </div>
+                    <div class="form-group">
+                        <label>اللقب</label>
+                        <input type="text" id="auth-reg-lastname" placeholder="مثال: بن عيسى" required>
+                    </div>
+                    <div class="form-group">
+                        <label>البريد الإلكتروني</label>
+                        <input type="email" id="auth-reg-email" placeholder="name@example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>كلمة السر الجديدة</label>
+                        <input type="password" id="auth-reg-password" placeholder="أنشئ كلمة سر قوية" required>
+                    </div>
+                    <div class="form-group">
+                        <label>رقم الهاتف</label>
+                        <input type="tel" id="auth-reg-phone" placeholder="06XXXXXXXX" required>
+                    </div>
+                    <div class="form-group">
+                        <label>المهارات والتخصص الأساسي</label>
+                        <select id="auth-reg-skills" required>
+                            <option value="medical">تمريض / طب / صحة ووقاية</option>
+                            <option value="environment">بيئة / تشجير وزراعة / حماية</option>
+                            <option value="education">تعليم / تدريس / دعم مدرسي</option>
+                            <option value="organizing">تنظيم إداري / لوجستستيك وتوثيق</option>
+                            <option value="general">تطوع عام ومساعدات اجتماعية</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn" style="background: var(--secondary);">إنشاء الحساب والدخول</button>
+                </form>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- التطبيق الرئيسي -->
+    <div id="app-container">
+        
+        <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+        <!-- الشريط الجانبي الأيمن -->
+        <aside id="right-sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">
+                    <i class="fa-solid fa-handshake-angle"></i>
+                    <div>
+                        <h1>تَطَوُّع</h1>
+                        <span>أقسام المنصة</span>
+                    </div>
+                </div>
+                <button class="close-sidebar-btn" onclick="toggleSidebar()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <ul class="sidebar-menu">
+                <li><a class="nav-link active" onclick="switchTab('home-tab', this)"><i class="fa-solid fa-house"></i> <span>الصفحة الرئيسية</span></a></li>
+                <li><a class="nav-link" onclick="switchTab('add-initiative-tab', this)"><i class="fa-solid fa-circle-plus" style="color: var(--secondary);"></i> <span>إضافة مبادرة جديدة</span></a></li>
+                <li><a class="nav-link" onclick="switchTab('impact-tab', this)"><i class="fa-solid fa-chart-pie"></i> <span>لوحة قياس الأثر</span></a></li>
+                <li><a class="nav-link" onclick="switchTab('initiatives-tab', this)"><i class="fa-solid fa-wand-magic-sparkles"></i> <span>المبادرات والمطابقة</span></a></li>
+                <li><a class="nav-link" onclick="switchTab('card-tab', this)"><i class="fa-solid fa-id-card"></i> <span>بطاقة المتطوع والـ QR</span></a></li>
+                <li><a class="nav-link" onclick="switchTab('map-tab', this)"><i class="fa-solid fa-map-location-dot"></i> <span>خريطة المبادرات</span></a></li>
+                <li id="admin-nav-item" style="display:none;"><a class="nav-link" onclick="switchTab('admin-tab', this)" style="color: #ef4444;"><i class="fa-solid fa-shield-halved"></i> <span>لوحة تحكم المشرف</span></a></li>
+            </ul>
+
+            <div class="sidebar-footer">
+                <div class="user-profile-box">
+                    <div class="user-info">
+                        <i class="fa-solid fa-user-circle" style="font-size: 24px; color: #0d9488;"></i>
+                        <div>
+                            <strong id="display-username" style="font-size: 13px; display: block;">زائر</strong>
+                            <span id="display-role" style="font-size: 11px; color: #64748b;">متطوع</span>
+                        </div>
+                    </div>
+                    <button onclick="logout()" class="btn-sm btn-danger" title="خروج"><i class="fa-solid fa-power-off"></i></button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- المحتوى الرئيسي للمنصة -->
+        <div class="main-wrapper">
+            <header class="top-header">
+                <button class="menu-toggle-btn" onclick="toggleSidebar()" title="القائمة">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                
+                <span style="font-weight: 700; color: #0f766e; font-size: 15px;"><i class="fa-solid fa-compass"></i> منصة تَطَوُّع - البوابة الوطنية</span>
+                <span style="font-size: 13px; color: #64748b;"><i class="fa-solid fa-calendar"></i> سبتمبر 2026</span>
+            </header>
+
+            <main>
+                <!-- 0. الصفحة الرئيسية -->
+                <div id="home-tab" class="tab-content active">
+                    <div class="hero-banner">
+                        <h2>منصة إدارة وتنسيق الحملات التطوعية</h2>
+                        <p class="definition">المنصة الرقمية الوطنية الموحدة لربط المبادرات وتوثيق الساعات التطوعية.</p>
+                        <div class="tagline">من الاحتياج.. إلى الاستجابة.. ومن التطوع.. إلى الأثر</div>
+                        <div style="margin-top: 25px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                            <button class="btn" style="width: auto; background: var(--secondary); color: white; padding: 10px 20px;" onclick="switchTab('add-initiative-tab', document.querySelectorAll('.sidebar-menu a')[1])">+ اقترح مبادرة جديدة</button>
+                        </div>
+                    </div>
+
+                    <div class="home-grid">
+                        <div>
+                            <div class="announcements-box">
+                                <h3 style="font-size: 16px; margin-bottom: 15px; color: #0f766e;"><i class="fa-solid fa-bullhorn"></i> أحدث الإعلانات الرسمية</h3>
+                                <div class="announcement-item">
+                                    <i class="fa-solid fa-circle-exclamation"></i>
+                                    <div>
+                                        <strong>انطلاق الحملة الوطنية الكبرى للعمل التطوعي</strong>
+                                        <p style="font-size: 13px; color: #64748b; margin-top: 3px;">ندعو كافة الجمعيات والفرق التطوعية عبر مختلف المناطق لاستخدام المنصة لتسجيل وتنسيق المبادرات.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="upcoming-dates-box">
+                                <h3 style="font-size: 16px; margin-bottom: 15px; color: #0f766e;"><i class="fa-solid fa-calendar-check"></i> مواعيد قادمة</h3>
+                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
+                                    <div class="date-badge">28 سبت</div>
+                                    <div>
+                                        <strong style="font-size: 14px; display: block;">الحملة الطبية الوطنية</strong>
+                                        <span style="font-size: 12px; color: #64748b;">المستشفى المركزي الرئيسي</span>
+                                    </div>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div class="date-badge" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">02 أكت</div>
+                                    <div>
+                                        <strong style="font-size: 14px; display: block;">الحملة الكبرى لتشجير المساحات</strong>
+                                        <span style="font-size: 12px; color: #64748b;">القطاع الشمالي</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- تبويب إضافة مبادرة جديدة -->
+                <div id="add-initiative-tab" class="tab-content">
+                    <div class="section-title">
+                        <span>إضافة واقتراح مبادرة تطوعية جديدة</span>
+                    </div>
+                    <p style="color: #64748b; margin-bottom: 20px; font-size: 14px;">املأ تفاصيل المبادرة ليتم إرسالها إلى لوحة تحكم المشرف للمراجعة والاعتماد.</p>
+
+                    <div class="register-form-box">
+                        <form onsubmit="handleAddNewInitiative(event)">
+                            <div class="form-group">
+                                <label>عنوان المبادرة</label>
+                                <input type="text" id="new-title" placeholder="مثال: حملة نظافة وتشجير الأحياء" required>
+                            </div>
+                            <div class="form-group">
+                                <label>الجهة أو الجمعية المقدمة</label>
+                                <input type="text" id="new-org" placeholder="مثال: جمعية العمل التطوعي الوطنية" required>
+                            </div>
+                            <div class="form-group">
+                                <label>مجال التخصص</label>
+                                <select id="new-category" required>
+                                    <option value="medical">تمريض / طب / صحة ووقاية</option>
+                                    <option value="environment">بيئة / تشجير وزراعة / حماية</option>
+                                    <option value="education">تعليم / تدريس / دعم مدرسي</option>
+                                    <option value="organizing">تنظيم إداري / لوجستستيك وتوثيق</option>
+                                    <option value="general">تطوع عام ومساعدات اجتماعية</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>الموقع الجغرافي (المنطقة أو الولاية)</label>
+                                <input type="text" id="new-location" placeholder="مثال: القطاع الأوسط / الولاية المركزية" required>
+                            </div>
+                            <div class="form-group">
+                                <label>موعد التنفيذ</label>
+                                <input type="text" id="new-date" placeholder="مثال: 15 أكتوبر 2026" required>
+                            </div>
+                            <div class="form-group">
+                                <label>وصف تفصيلي للمبادرة</label>
+                                <input type="text" id="new-desc" placeholder="اكتب نبذة مختصرة عن أهداف الحملة..." required>
+                            </div>
+                            <button type="submit" class="btn" style="background: var(--secondary);">إرسال المبادرة للمشرف</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- 1. لوحة قياس الأثر -->
+                <div id="impact-tab" class="tab-content">
+                    <div class="section-title">
+                        <span>لوحة قياس الأثر الإجمالي</span>
+                        <span style="font-size: 13px; color: #64748b;">على مستوى الوطن</span>
+                    </div>
+
+                    <div class="impact-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-clock"></i></div>
+                            <div class="stat-info">
+                                <h3>25,420</h3>
+                                <p>ساعة تطوع مسجلة</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-users"></i></div>
+                            <div class="stat-info">
+                                <h3>12,850</h3>
+                                <p>مستفيد من المبادرات</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-building-columns"></i></div>
+                            <div class="stat-info">
+                                <h3>145</h3>
+                                <p>مؤسسة وجمعية مشاركة</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-check-double"></i></div>
+                            <div class="stat-info">
+                                <h3>320</h3>
+                                <p>مهمة مكتملة بنجاح</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="charts-container">
+                        <div class="chart-box">
+                            <h3>تطور ساعات التطوع خلال الأشهر الماضية</h3>
+                            <canvas id="hoursChart" height="130"></canvas>
+                        </div>
+                        <div class="chart-box">
+                            <h3>توزيع المبادرات حسب القطاعات</h3>
+                            <canvas id="distChart" height="130"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. المبادرات والمطابقة الذكية -->
+                <div id="initiatives-tab" class="tab-content">
+                    <div class="section-title">
+                        <span>المبادرات المقبولة المتاحة وحساب نسبة المطابقة الذكية</span>
+                    </div>
+                    <p style="color: #64748b; margin-bottom: 20px; font-size: 14px;">تعرض هذه القائمة فقط المبادرات التي تمت الموافقة عليها من طرف مشرف المنصة.</p>
+
+                    <div class="grid-cards" id="initiatives-container"></div>
+                </div>
+
+                <!-- 3. بطاقة المتطوع ورمز الـ QR -->
+                <div id="card-tab" class="tab-content">
+                    <div class="section-title">
+                        <span>بطاقة المتطوع الرسمية (معتمدة برمز الـ QR)</span>
+                    </div>
+                    <p style="color: #64748b; margin-bottom: 25px; text-align: center; font-size: 14px;">تم تكوين هذه البطاقة تلقائياً بناءً على بياناتك المسجلة.</p>
+
+                    <div class="volunteer-id-card">
+                        <div class="id-header">
+                            <div>
+                                <span style="font-size: 11px; opacity: 0.8; letter-spacing: 1px;">منصة تَطَوُّع الوطنية</span>
+                                <h4 style="font-size: 16px;">بطاقة متطوع معتمد</h4>
+                            </div>
+                            <i class="fa-solid fa-id-badge" style="font-size: 28px;"></i>
+                        </div>
+                        <div class="id-body">
+                            <div class="id-details">
+                                <h3 id="card-fullname">الاسم واللقب</h3>
+                                <p><strong>الهاتف:</strong> <span id="card-phone">06XXXXXXXX</span></p>
+                                <p><strong>البريد:</strong> <span id="card-email">user@mail.com</span></p>
+                                <p><strong>المهارة:</strong> <span id="card-skill-text">تخصص عام</span></p>
+                            </div>
+                            <div class="qr-placeholder">
+                                <img id="card-qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=VOLUNTEER" alt="QR Code">
+                                <span style="font-size: 9px; color: #333; margin-top: 4px; display: block; font-weight: 700;">مسح الحضور الآلي</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. خريطة المبادرات -->
+                <div id="map-tab" class="tab-content">
+                    <div class="section-title">
+                        <span>خريطة المبادرات الوطنية</span>
+                    </div>
+                    
+                    <div class="map-wrapper">
+                        <div class="map-header-bar">
+                            <span><i class="fa-solid fa-map-location-dot" style="color: #0d9488;"></i> مواقع المبادرات المقبولة والمنضم إليها عبر مختلف المناطق</span>
+                        </div>
+                        <div class="mock-map" id="map-container-pins"></div>
+                    </div>
+                </div>
+
+                <!-- 5. لوحة المشرف -->
+                <div id="admin-tab" class="tab-content">
+                    <div class="section-title">
+                        <span>لوحة تحكم مشرف المنصة (قبول/رفض المبادرات)</span>
+                    </div>
+                    <p style="color: #64748b; margin-bottom: 20px; font-size: 14px;">أنت المشرف الوحيد المخول بقبول المبادرات أو رفضها.</p>
+
+                    <h3 style="font-size: 15px; margin-bottom: 12px; color: #0f766e;">إدارة طلبات المبادرات المقدمة</h3>
+                    <div style="overflow-x: auto; margin-bottom: 30px;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>اسم المبادرة</th>
+                                    <th>الجهة المقدمة</th>
+                                    <th>الموقع</th>
+                                    <th>الحالة</th>
+                                    <th>الإجراء (قبول / رفض)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-initiatives-table-body"></tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="font-size: 15px; margin-bottom: 12px; color: #0f766e;">إدارة المتطوعين المسجلين</h3>
+                    <div style="overflow-x: auto;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>المتطوع</th>
+                                    <th>البريد الإلكتروني</th>
+                                    <th>إدارة الحساب</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>سليمان بن عيسى</td>
+                                    <td>slimane@example.com</td>
+                                    <td><button class="btn-sm btn-danger" onclick="deleteVolunteer(this)"><i class="fa-solid fa-trash"></i> حذف</button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
+
+            <footer>
+                <p>جميع الحقوق محفوظة © 2026 - منصة تَطَوُّع الوطنية لخدمة العمل التطوعي.</p>
+            </footer>
+        </div>
+    </div>
+
+    <!-- ربط ملف الجافاسكريبت الخارجي -->
+    <script src="script.js"></script>
+</body>
+</html>
