@@ -1,0 +1,871 @@
+const MUNICIPALITY_COORDS = {
+  "المركز": [30.1333, -2.1667],
+  "كرزاز": [29.4500, -1.4167],
+  "إقلي": [30.5000, -2.2833],
+  "الواتة": [29.8667, -1.8333],
+  "تبلبالة": [29.4000, -3.2500],
+  "أولاد خضير": [29.2167, -1.0667],
+  "بني يخلف": [29.1333, -0.9833],
+  "القصابي": [29.2833, -1.1833],
+  "تيمودي": [29.5833, -1.5333],
+  "مشرع هواري بومدين": [30.3333, -2.2167]
+};
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDlvXAVdYZcfjTYynLMlieR5JBTS4JmNK8",
+  authDomain: "gggg-2904f.firebaseapp.com",
+  databaseURL: "https://gggg-2904f-default-rtdb.firebaseio.com",
+  projectId: "gggg-2904f",
+  storageBucket: "gggg-2904f.firebasestorage.app",
+  messagingSenderId: "646285342822",
+  appId: "1:646285342822:web:4cde1778807473f78255a7",
+  measurementId: "G-RL1R1XWVNE"
+};
+
+let db = null, auth = null, useFirebase = false;
+
+try {
+  if (typeof firebase !== 'undefined' && firebase.apps) {
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    auth = firebase.auth();
+    useFirebase = true;
+  }
+} catch (e) { useFirebase = false; }
+
+let authMode = "login";
+let localVolunteers = JSON.parse(localStorage.getItem("ba_local_volunteers")) || [];
+let localCampaigns = JSON.parse(localStorage.getItem("ba_local_campaigns")) || [];
+let localAttendance = JSON.parse(localStorage.getItem("ba_local_attendance")) || [];
+let localJoins = JSON.parse(localStorage.getItem("ba_local_joins")) || [];
+let html5QrCodeScanner = null;
+
+let leafletMap = null;
+let mapMarkers = [];
+let pickerMap = null;
+let pickerMarker = null;
+
+function saveLocalData() {
+  localStorage.setItem("ba_local_volunteers", JSON.stringify(localVolunteers));
+  localStorage.setItem("ba_local_campaigns", JSON.stringify(localCampaigns));
+  localStorage.setItem("ba_local_attendance", JSON.stringify(localAttendance));
+  localStorage.setItem("ba_local_joins", JSON.stringify(localJoins));
+}
+
+function initMap() {
+  if (leafletMap) return;
+  const mapEl = document.getElementById('map-container');
+  if (!mapEl) return;
+
+  leafletMap = L.map('map-container').setView([29.8, -1.9], 7);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '© OpenStreetMap'
+  }).addTo(leafletMap);
+
+  updateMapMarkers();
+}
+
+function updateMapMarkers() {
+  if (!leafletMap) return;
+  mapMarkers.forEach(m => leafletMap.removeLayer(m));
+  mapMarkers = [];
+
+  localCampaigns.filter(c => c.status === "نشطة" || c.status === "معتمدة").forEach(camp => {
+    const lat = camp.lat || (MUNICIPALITY_COORDS[camp.city] ? MUNICIPALITY_COORDS[camp.city][0] : 30.1333);
+    const lng = camp.lng || (MUNICIPALITY_COORDS[camp.city] ? MUNICIPALITY_COORDS[camp.city][1] : -2.1667);
+    
+    const marker = L.circleMarker([lat, lng], {
+      radius: 10,
+      fillColor: "#0f8f74",
+      color: "#ffffff",
+      weight: 2,
+      opacity: 1,
+      fillOpacity: 0.95
+    }).addTo(leafletMap);
+
+    const popupContent = `
+      <div style="font-family:'Tajawal',sans-serif; text-align:right;">
+        <h4 style="margin:0 0 5px; color:#0d382d; font-size:14px; font-weight:800;">${camp.title}</h4>
+        <p style="margin:0 0 4px; font-size:12px; color:#15803d; font-weight:700;">📍 بلدية ${camp.city}</p>
+        <p style="margin:0 0 4px; font-size:11px; color:#0369a1; font-weight:700;">📅 التاريخ: ${camp.campDate || 'غير محدد'}</p>
+        <p style="margin:0 0 4px; font-size:11px; color:#1e293b; font-weight:bold;">👤 المنشئ: ${camp.creatorName || 'غير معروف'} (العمر: ${camp.creatorAge || '-'})</p>
+        <p style="margin:0 0 6px; font-size:11px; color:#64748b;">المجال: ${camp.skill} (${camp.urgency})</p>
+      </div>
+    `;
+    marker.bindPopup(popupContent);
+    mapMarkers.push(marker);
+  });
+}
+
+function initPickerMap() {
+  const city = document.getElementById('camp-city').value;
+  const defaultCoords = MUNICIPALITY_COORDS[city] || [30.1333, -2.1667];
+
+  if (!pickerMap) {
+    pickerMap = L.map('picker-map-container').setView(defaultCoords, 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap'
+    }).addTo(pickerMap);
+
+    pickerMarker = L.marker(defaultCoords, { draggable: true }).addTo(pickerMap);
+
+    pickerMarker.on('dragend', function(e) {
+      const pos = e.target.getLatLng();
+      setCampaignPickerCoords(pos.lat, pos.lng);
+    });
+
+    pickerMap.on('click', function(e) {
+      pickerMarker.setLatLng(e.latlng);
+      setCampaignPickerCoords(e.latlng.lat, e.latlng.lng);
+    });
+  } else {
+    pickerMap.invalidateSize();
+    pickerMap.setView(defaultCoords, 11);
+    pickerMarker.setLatLng(defaultCoords);
+    setCampaignPickerCoords(defaultCoords[0], defaultCoords[1]);
+  }
+}
+
+function setCampaignPickerCoords(lat, lng) {
+  document.getElementById('camp-lat').value = lat.toFixed(6);
+  document.getElementById('camp-lng').value = lng.toFixed(6);
+  const city = document.getElementById('camp-city').value;
+  document.getElementById('picker-coords-text').textContent = 
+    `الموقع المحدد: بلدية ${city} (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+}
+
+window.onModalMunicipalityChange = function() {
+  const city = document.getElementById('camp-city').value;
+  const coords = MUNICIPALITY_COORDS[city] || [30.1333, -2.1667];
+  if (pickerMap && pickerMarker) {
+    pickerMap.setView(coords, 11);
+    pickerMarker.setLatLng(coords);
+    setCampaignPickerCoords(coords[0], coords[1]);
+  }
+};
+
+window.locateUserGPSForCampaign = function() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      if (pickerMap && pickerMarker) {
+        pickerMap.setView([lat, lng], 14);
+        pickerMarker.setLatLng([lat, lng]);
+        setCampaignPickerCoords(lat, lng);
+        alert("تم التقاط موقعك الجغرافي وتثبيته على الخريطة بنجاح!");
+      }
+    }, () => {
+      alert("تعذر الوصول لموقع GPS.");
+    });
+  }
+};
+
+window.focusOnMap = function(lat, lng) {
+  switchMainTab('opps-section');
+  if (leafletMap) {
+    leafletMap.setView([lat, lng], 12, { animate: true });
+    mapMarkers.forEach(m => {
+      const pos = m.getLatLng();
+      if (Math.abs(pos.lat - lat) < 0.001 && Math.abs(pos.lng - lng) < 0.001) {
+        m.openPopup();
+      }
+    });
+  }
+};
+
+window.switchMainTab = function(sectionId) {
+  document.querySelectorAll('.app-section').forEach(sec => sec.classList.remove('active'));
+  document.querySelectorAll('.nav-tab-btn').forEach(btn => btn.classList.remove('active'));
+
+  const targetSec = document.getElementById(sectionId);
+  if (targetSec) targetSec.classList.add('active');
+
+  if (sectionId === 'home-section') {
+    document.getElementById('tab-btn-home').classList.add('active');
+  } else if (sectionId === 'opps-section') {
+    document.getElementById('tab-btn-opps').classList.add('active');
+    setTimeout(() => {
+      initMap();
+      if (leafletMap) {
+        leafletMap.invalidateSize();
+        updateMapMarkers();
+      }
+    }, 200);
+  } else if (sectionId === 'attendance-section') {
+    document.getElementById('tab-btn-attendance').classList.add('active');
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+function checkLoginStatus() {
+  const savedUser = localStorage.getItem("ba_logged_user");
+  if (savedUser) {
+    document.getElementById("auth-screen").style.display = "none";
+    document.getElementById("main-app-screen").style.display = "block";
+    document.getElementById("user-top-email").textContent = savedUser;
+  } else {
+    document.getElementById("auth-screen").style.display = "flex";
+    document.getElementById("main-app-screen").style.display = "none";
+  }
+  updateAllUI();
+}
+
+window.switchAuthTab = function(mode) {
+  authMode = mode;
+  document.getElementById("auth-error-box").style.display = "none";
+  document.getElementById("auth-tab-login").className = mode === "login" ? "active" : "";
+  document.getElementById("auth-tab-signup").className = mode === "signup" ? "active" : "";
+  document.getElementById("auth-submit-btn").textContent = mode === "login" ? "دخول للمنصة" : "إنشاء حساب جديد والدخول";
+};
+
+window.handleAuthSubmit = async function(e) {
+  e.preventDefault();
+  const email = document.getElementById("auth-email-input").value.trim();
+  loginSuccess(email);
+};
+
+function loginSuccess(email) {
+  localStorage.setItem("ba_logged_user", email);
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("main-app-screen").style.display = "block";
+  document.getElementById("user-top-email").textContent = email;
+  updateAllUI();
+}
+
+window.doLogout = function() {
+  if (confirm("هل تريد تسجيل الخروج؟")) {
+    localStorage.removeItem("ba_logged_user");
+    document.getElementById("main-app-screen").style.display = "none";
+    document.getElementById("auth-screen").style.display = "flex";
+  }
+};
+
+window.openModal = function(id) {
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.style.display = "flex";
+    if (id === 'mycard-modal') generateSelectedVolunteerQR();
+    if (id === 'campaign-modal') setTimeout(initPickerMap, 250);
+    if (id === 'matching-modal') updateMatchingCampaignSelect();
+    if (id === 'manager-dashboard-modal') {
+      renderManagerCampaignsList();
+      renderManagerVolunteersList();
+    }
+  }
+};
+
+window.closeModal = function(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.style.display = "none";
+};
+
+function syncData() {
+  if (useFirebase && db) {
+    db.ref("volunteers").on("value", (snap) => {
+      const val = snap.val();
+      if (val) {
+        localVolunteers = [];
+        Object.keys(val).forEach(k => localVolunteers.push({ id: k, ...val[k] }));
+        saveLocalData();
+        updateAllUI();
+      }
+    });
+
+    db.ref("campaigns").on("value", (snap) => {
+      const val = snap.val();
+      if (val) {
+        localCampaigns = [];
+        Object.keys(val).forEach(k => localCampaigns.push({ id: k, ...val[k] }));
+        saveLocalData();
+        updateAllUI();
+      }
+    });
+
+    db.ref("attendance").on("value", (snap) => {
+      const val = snap.val();
+      if (val) {
+        localAttendance = [];
+        Object.keys(val).forEach(k => localAttendance.push({ id: k, ...val[k] }));
+        saveLocalData();
+        updateAllUI();
+      }
+    });
+
+    db.ref("joins").on("value", (snap) => {
+      const val = snap.val();
+      if (val) {
+        localJoins = [];
+        Object.keys(val).forEach(k => localJoins.push({ id: k, ...val[k] }));
+        saveLocalData();
+        updateAllUI();
+      }
+    });
+  }
+}
+
+function updateAllUI() {
+  const volCount = document.getElementById("stat-volunteers");
+  const campCount = document.getElementById("stat-campaigns");
+  const hoursCount = document.getElementById("stat-hours");
+  const badgesCount = document.getElementById("stat-badges");
+
+  if (volCount) volCount.textContent = localVolunteers.length;
+  if (campCount) campCount.textContent = localCampaigns.filter(c => c.status === "مكتملة").length;
+  
+  const totalHours = localAttendance.reduce((acc, curr) => acc + (Number(curr.hours) || 0), 0);
+  if (hoursCount) hoursCount.textContent = totalHours;
+  if (badgesCount) badgesCount.textContent = Math.floor(totalHours / 10);
+
+  renderOpportunities();
+  renderFeaturedCampaigns();
+  updateVolunteerSelect();
+  updateCampaignSelectUI();
+  updateQuickAttendanceSelect();
+  updateMatchingCampaignSelect();
+  updateMapMarkers();
+  if (document.getElementById("manager-dashboard-modal").style.display === "flex") {
+    renderManagerCampaignsList();
+    renderManagerVolunteersList();
+  }
+}
+
+window.handleManagerLogin = function(e) {
+  e.preventDefault();
+  const name = document.getElementById("mgr-name").value.trim();
+  const code = document.getElementById("mgr-code").value.trim();
+  const secureKey = "adminkey1";
+
+  if (code === secureKey && name.length > 0) {
+    localStorage.setItem("ba_manager_logged", name);
+    document.getElementById("manager-login-form").reset();
+    closeModal('manager-auth-modal');
+    alert(`مرحباً بك يا ${name}! تم الدخول بنجاح.`);
+    openModal('manager-dashboard-modal');
+  } else {
+    alert("الرمز السري أو الاسم غير صحيح!");
+  }
+};
+
+window.doManagerLogout = function() {
+  localStorage.removeItem("ba_manager_logged");
+  closeModal('manager-dashboard-modal');
+  alert("تم تسجيل خروج المشرف.");
+};
+
+window.switchMgrTab = function(tabName) {
+  const campsSec = document.getElementById("mgr-section-camps");
+  const volsSec = document.getElementById("mgr-section-vols");
+  const btnCamps = document.getElementById("mgr-tab-camps");
+  const btnVols = document.getElementById("mgr-tab-vols");
+
+  if (tabName === 'camps') {
+    campsSec.style.display = "block";
+    volsSec.style.display = "none";
+    btnCamps.style.background = "#0f8f74";
+    btnVols.style.background = "#64748b";
+    renderManagerCampaignsList();
+  } else {
+    campsSec.style.display = "none";
+    volsSec.style.display = "block";
+    btnCamps.style.background = "#64748b";
+    btnVols.style.background = "#0f8f74";
+    renderManagerVolunteersList();
+  }
+};
+
+function renderManagerCampaignsList() {
+  const container = document.getElementById("manager-campaigns-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (localCampaigns.length === 0) {
+    container.innerHTML = `<p style="text-align: center; color: #64748b; padding: 2rem;">لا توجد أي حملات مسجلة في قاعدة البيانات.</p>`;
+    return;
+  }
+
+  localCampaigns.forEach(camp => {
+    const isApproved = camp.status === "نشطة" || camp.status === "معتمدة";
+    const campJoins = localJoins.filter(j => j.campaignId === camp.id);
+
+    const item = document.createElement("div");
+    item.style.cssText = "background: #f8fafc; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; display: flex; flex-direction: column; gap: 0.8rem;";
+
+    let joinsHtml = `<div style="margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px dashed #cbd5e1;">`;
+    joinsHtml += `<strong style="font-size:0.85rem; color:#0d382d;"><i class="fa-solid fa-users"></i> المتطوعون المنضمون (${campJoins.length}):</strong>`;
+    if (campJoins.length > 0) {
+      joinsHtml += `<ul style="margin: 0.3rem 1.2rem 0; font-size: 0.82rem; color: #475569;">`;
+      campJoins.forEach(j => {
+        joinsHtml += `<li>${j.user}</li>`;
+      });
+      joinsHtml += `</ul>`;
+    } else {
+      joinsHtml += `<span style="font-size: 0.8rem; color: #94a3b8; display: block; margin-top: 0.2rem;">لا يوجد متطوعون منضمون حتى الآن.</span>`;
+    }
+    joinsHtml += `</div>`;
+
+    item.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+          <h4 style="color: #0d382d; font-size: 1rem; font-weight: 800; margin-bottom: 0.2rem;">${camp.title}</h4>
+          <p style="font-size: 0.82rem; color: #64748b;">📍 بلدية ${camp.city} | 👤 المنشئ: ${camp.creatorName}</p>
+          <span style="font-size: 0.78rem; font-weight: bold; color: ${isApproved ? '#15803d' : '#d97706'};">
+            الحالة: ${isApproved ? 'معتمدة وناشطة' : '⏳ قيد المعالجة'}
+          </span>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          ${!isApproved ? `<button class="btn-approve-camp" onclick="managerApproveCampaign('${camp.id}')"><i class="fa-solid fa-check"></i> موافقة</button>` : ''}
+          <button class="btn-delete-camp" onclick="deleteCampaign('${camp.id}')"><i class="fa-solid fa-trash"></i> حذف</button>
+        </div>
+      </div>
+      ${joinsHtml}
+    `;
+    container.appendChild(item);
+  });
+}
+
+function renderManagerVolunteersList() {
+  const container = document.getElementById("manager-volunteers-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (localVolunteers.length === 0) {
+    container.innerHTML = `<p style="text-align: center; color: #64748b; padding: 2rem;">لا توجد أي سجلات متطوعين مسجلة بالمنصة حالياً.</p>`;
+    return;
+  }
+
+  localVolunteers.forEach(v => {
+    const item = document.createElement("div");
+    item.style.cssText = "background: #f8fafc; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.8rem;";
+    item.innerHTML = `
+      <div>
+        <h4 style="color: #0d382d; font-size: 1rem; font-weight: 800; margin-bottom: 0.3rem;">${v.name}</h4>
+        <p style="font-size: 0.85rem; color: #1e293b; font-weight: bold; margin-bottom: 0.2rem;">
+          📞 الهاتف: <a href="tel:${v.phone}" style="color: #0f8f74; text-decoration: none;">${v.phone || 'غير متوفر'}</a>
+        </p>
+        <p style="font-size: 0.82rem; color: #64748b;">
+          📍 البلدية: ${v.city} | 🎯 التخصص: ${v.skill}
+        </p>
+      </div>
+      <button class="btn-delete-camp" onclick="managerDeleteVolunteer('${v.id}')" style="padding: 0.3rem 0.8rem; font-size: 0.78rem;">حذف المتطوع</button>
+    `;
+    container.appendChild(item);
+  });
+}
+
+window.managerDeleteVolunteer = function(volId) {
+  if (confirm("هل أنت متأكد من حذف هذا المتطوع نهائياً؟")) {
+    localVolunteers = localVolunteers.filter(v => v.id !== volId);
+    saveLocalData();
+    if (useFirebase && db) {
+      db.ref("volunteers/" + volId).remove().catch((e) => console.error(e));
+    }
+    updateAllUI();
+    alert("تم حذف المتطوع بنجاح وإزالته من النظام.");
+  }
+};
+
+window.managerApproveCampaign = function(id) {
+  const camp = localCampaigns.find(c => c.id === id);
+  if (camp) camp.status = "نشطة";
+  saveLocalData();
+  if (useFirebase && db) {
+    db.ref("campaigns/" + id).update({ status: "نشطة" }).catch((e) => console.error(e));
+  }
+  updateAllUI();
+  alert("تمت الموافقة على الحملة وأصبحت نشطة!");
+};
+
+window.clearAllCampaigns = function() {
+  if (confirm("هل أنت متأكد من حذف جميع الحملات؟")) {
+    localCampaigns = [];
+    saveLocalData();
+    if (useFirebase && db) db.ref("campaigns").remove();
+    updateAllUI();
+  }
+};
+
+function renderFeaturedCampaigns() {
+  const container = document.getElementById("featured-campaigns-container");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (localCampaigns.length === 0) {
+    container.innerHTML = `<p style="color: #64748b; font-size: 0.95rem; text-align: center; padding: 1.5rem;">لا توجد حملات مبرمجة حالياً.</p>`;
+    return;
+  }
+
+  const currentUser = localStorage.getItem("ba_logged_user");
+  const isManagerLoggedIn = localStorage.getItem("ba_manager_logged");
+
+  localCampaigns.forEach(camp => {
+    const isApproved = camp.status === "نشطة" || camp.status === "معتمدة";
+    const canView = isApproved || isManagerLoggedIn || (camp.createdBy && camp.createdBy === currentUser);
+
+    if (!canView) return;
+
+    const hasJoined = localJoins.some(j => j.campaignId === camp.id && j.user === currentUser);
+    const item = document.createElement("div");
+    item.style.cssText = "background: #f8fafc; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;";
+    item.innerHTML = `
+      <div>
+        <h4 style="color: #0d382d; font-size: 1rem; font-weight: 800; margin-bottom: 0.2rem;">${camp.title}</h4>
+        <p style="font-size: 0.82rem; color: #64748b;">📍 بلدية ${camp.city} | 📅 التاريخ: ${camp.campDate || 'غير محدد'}</p>
+        ${!isApproved ? `<span style="font-size: 0.75rem; color: #d97706; font-weight: bold;">⏳ قيد المعالجة (بانتظار موافقة المشرف)</span>` : ''}
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        ${isApproved ? `<button class="btn-apply ${hasJoined ? 'btn-applied' : ''}" onclick="applyToCampaign('${camp.id}', '${camp.title}')" style="${hasJoined ? 'background-color: #dc2626 !important;' : ''}">
+          ${hasJoined ? '<i class="fa-solid fa-xmark"></i> إلغاء الانضمام' : 'انضمام'}
+        </button>` : `<span style="font-size: 0.8rem; color: #d97706; font-weight: bold;">بانتظار الموافقة</span>`}
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+function renderOpportunities() {
+  const container = document.getElementById("opp-cards-container");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (localCampaigns.length === 0) {
+    container.innerHTML = `<div class="empty-state-card"><h3>لا توجد مبادرات مسجلة حالياً</h3></div>`;
+    return;
+  }
+
+  const currentUser = localStorage.getItem("ba_logged_user");
+  const isManagerLoggedIn = localStorage.getItem("ba_manager_logged");
+
+  localCampaigns.forEach(camp => {
+    const isApproved = camp.status === "نشطة" || camp.status === "معتمدة";
+    const canView = isApproved || isManagerLoggedIn || (camp.createdBy && camp.createdBy === currentUser);
+
+    if (!canView) return;
+
+    const lat = camp.lat || (MUNICIPALITY_COORDS[camp.city] ? MUNICIPALITY_COORDS[camp.city][0] : 30.1333);
+    const lng = camp.lng || (MUNICIPALITY_COORDS[camp.city] ? MUNICIPALITY_COORDS[camp.city][1] : -2.1667);
+    const hasJoined = localJoins.some(j => j.campaignId === camp.id && j.user === currentUser);
+
+    const card = document.createElement("article");
+    card.className = "opp-card";
+    card.innerHTML = `
+      <div>
+        <span class="tag-category tag-green">${camp.skill}</span>
+        <h3 class="opp-card-title">${camp.title}</h3>
+        <p style="font-size:0.82rem; color:#0f8f74; font-weight:700;">📅 ${camp.campDate || 'غير محدد'}</p>
+        ${!isApproved ? `<p style="margin-top:0.4rem;"><span style="font-size: 0.75rem; color: #d97706; font-weight: bold;">⏳ قيد المعالجة (بانتظار موافقة المشرف)</span></p>` : ''}
+      </div>
+      <div class="opp-card-footer">
+        <span>📍 بلدية ${camp.city}</span>
+        <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+          <button class="btn-view-map" onclick="focusOnMap(${lat}, ${lng})">موقعها</button>
+          ${isApproved ? `<button class="btn-apply ${hasJoined ? 'btn-applied' : ''}" onclick="applyToCampaign('${camp.id}', '${camp.title}')" style="${hasJoined ? 'background-color: #dc2626 !important;' : ''}">
+            ${hasJoined ? '<i class="fa-solid fa-xmark"></i> إلغاء الانضمام' : 'انضمام'}
+          </button>` : ''}
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+window.applyToCampaign = function(campaignId, title) {
+  const currentUser = localStorage.getItem("ba_logged_user");
+  if (!currentUser) { alert("يرجى تسجيل الدخول أولاً!"); return; }
+
+  const existingJoinIndex = localJoins.findIndex(j => j.campaignId === campaignId && j.user === currentUser);
+
+  if (existingJoinIndex !== -1) {
+    const joinedItem = localJoins[existingJoinIndex];
+    localJoins.splice(existingJoinIndex, 1);
+    saveLocalData();
+    if (useFirebase && db && joinedItem.id) {
+      db.ref("joins/" + joinedItem.id).remove();
+    }
+    updateAllUI();
+    alert(`تم التراجع وإلغاء انضمامك إلى حملة "${title}" بنجاح.`);
+  } else {
+    const joinId = "join_" + Date.now();
+    const joinData = { id: joinId, campaignId, campaignTitle: title, user: currentUser, timestamp: Date.now() };
+    localJoins.push(joinData);
+    saveLocalData();
+    if (useFirebase && db) {
+      db.ref("joins").child(joinId).set(joinData);
+    }
+    updateAllUI();
+    alert(`تم بنجاح الانضمام إلى حملة "${title}"!`);
+  }
+};
+
+window.deleteCampaign = function(id) {
+  if (confirm("هل أنت متأكد من حذف هذه المبادرة نهائياً؟")) {
+    localCampaigns = localCampaigns.filter(c => c.id !== id);
+    saveLocalData();
+    if (useFirebase && db) db.ref("campaigns/" + id).remove();
+    updateAllUI();
+    alert("تم حذف الحملة بنجاح بواسطة المشرف.");
+  }
+};
+
+document.getElementById("campaign-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const city = document.getElementById("camp-city").value;
+  const newCamp = {
+    id: "camp_" + Date.now(),
+    title: document.getElementById("camp-title").value.trim(),
+    creatorName: document.getElementById("camp-creator-name").value.trim(),
+    creatorAge: document.getElementById("camp-creator-age").value.trim(),
+    city: city,
+    lat: parseFloat(document.getElementById("camp-lat").value) || 30.1333,
+    lng: parseFloat(document.getElementById("camp-lng").value) || -2.1667,
+    skill: document.getElementById("camp-skill").value,
+    urgency: document.getElementById("camp-urgency").value,
+    campDate: document.getElementById("camp-date").value,
+    createdBy: localStorage.getItem("ba_logged_user") || "",
+    status: "معلقة",
+    createdAt: Date.now()
+  };
+
+  localCampaigns.push(newCamp);
+  saveLocalData();
+  if (useFirebase && db) db.ref("campaigns").child(newCamp.id).set(newCamp);
+  
+  document.getElementById("campaign-form").reset();
+  closeModal('campaign-modal');
+  updateAllUI();
+  alert("تم إرسال المبادرة وهي قيد المعالجة بانتظار موافقة المشرف!");
+  switchMainTab('opps-section');
+});
+
+document.getElementById("volunteer-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const pSkills = document.getElementById("vol-practical-skills").value.trim();
+  const hobbies = document.getElementById("vol-hobbies").value.trim();
+  
+  const newVol = {
+    id: "vol_" + Date.now(),
+    name: document.getElementById("vol-name").value.trim(),
+    phone: document.getElementById("vol-phone").value.trim(),
+    city: document.getElementById("vol-city").value,
+    skill: document.getElementById("vol-skill").value,
+    practicalSkills: pSkills ? pSkills.split(',').map(s => s.trim()) : [],
+    hobbies: hobbies ? hobbies.split(',').map(h => h.trim()) : [],
+    hours: 4,
+    createdBy: localStorage.getItem("ba_logged_user") || "",
+    createdAt: Date.now()
+  };
+
+  localVolunteers.push(newVol);
+  saveLocalData();
+  if (useFirebase && db) {
+    db.ref("volunteers").child(newVol.id).set(newVol);
+  }
+
+  document.getElementById("volunteer-form").reset();
+  alert(`تم تسجيلك كمتطوع بنجاح!`);
+  updateAllUI();
+  
+  setTimeout(() => {
+    const sel = document.getElementById("volunteer-select-qr");
+    if (sel) {
+      sel.value = newVol.id;
+      generateSelectedVolunteerQR();
+    }
+  }, 300);
+});
+
+function updateVolunteerSelect() {
+  const sel = document.getElementById("volunteer-select-qr");
+  if (!sel) return;
+  const cur = sel.value;
+  const currentUser = localStorage.getItem("ba_logged_user") || "";
+  const myVolunteers = localVolunteers.filter(v => v.createdBy === currentUser);
+
+  sel.innerHTML = `<option value="">-- اختر المتطوع لعرض هويته --</option>`;
+  myVolunteers.forEach(v => {
+    sel.innerHTML += `<option value="${v.id}">${v.name} (بلدية ${v.city})</option>`;
+  });
+  if (cur) sel.value = cur;
+}
+
+function updateQuickAttendanceSelect() {
+  const sel = document.getElementById("quick-att-vol-select");
+  if (!sel) return;
+  sel.innerHTML = `<option value="">-- اختر المتطوع --</option>`;
+  localVolunteers.forEach(v => {
+    sel.innerHTML += `<option value="${v.id}">${v.name} (${v.city})</option>`;
+  });
+}
+
+function updateMatchingCampaignSelect() {
+  const sel = document.getElementById("matching-campaign-select");
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">-- اختر مبادرة --</option>`;
+  localCampaigns.filter(c => c.status === "نشطة" || c.status === "معتمدة").forEach(c => {
+    sel.innerHTML += `<option value="${c.id}">${c.title} (بلدية ${c.city})</option>`;
+  });
+  if (cur) sel.value = cur;
+}
+
+window.runSmartMatching = function() {
+  const campId = document.getElementById("matching-campaign-select").value;
+  const resultsArea = document.getElementById("matching-results-area");
+  if (!campId) return;
+
+  const camp = localCampaigns.find(c => c.id === campId);
+  if (!camp) return;
+
+  const matched = localVolunteers.filter(v => v.city === camp.city || v.skill === camp.skill);
+  if (matched.length === 0) {
+    resultsArea.innerHTML = `<div style="text-align: center; color: #b91c1c; padding: 1.5rem; background:#fee2e2; border-radius: 10px;">لا يوجد متطوعون مطابقون حالياً.</div>`;
+    return;
+  }
+
+  let html = `<h4 style="color: #0d382d; margin-bottom: 0.8rem;">المتطوعون المطابقون:</h4><div style="display: flex; flex-direction: column; gap: 0.8rem;">`;
+  matched.forEach(v => {
+    html += `
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <div><h5>${v.name}</h5><p style="font-size:0.8rem; color:#64748b;">بلدية: ${v.city} | التخصص: ${v.skill}</p></div>
+        <button class="btn-apply" onclick="alert('تم تعيين المتطوع ${v.name} بنجاح')">تعيين بالفريق</button>
+      </div>
+    `;
+  });
+  html += `</div>`;
+  resultsArea.innerHTML = html;
+};
+
+window.generateSelectedVolunteerQR = function() {
+  const sel = document.getElementById("volunteer-select-qr");
+  const canvas = document.getElementById("qrcode-canvas");
+  const previewArea = document.getElementById("qr-preview-area");
+  if (!sel || !canvas) return;
+
+  const volId = sel.value;
+  canvas.innerHTML = "";
+  if (!volId) { if (previewArea) previewArea.style.display = "none"; return; }
+
+  const vol = localVolunteers.find(v => v.id === volId);
+  if (vol) {
+    if (previewArea) previewArea.style.display = "flex";
+    document.getElementById("qr-volunteer-name").textContent = vol.name;
+    document.getElementById("qr-volunteer-municipality").textContent = `بلدية ${vol.city}`;
+    document.getElementById("vol-info-phone").textContent = vol.phone || "غير متوفر";
+    document.getElementById("vol-info-skill").textContent = vol.skill || "غير محدد";
+    document.getElementById("vol-info-prac").textContent = vol.practicalSkills ? vol.practicalSkills.join(', ') : "لا توجد";
+    document.getElementById("vol-info-hobbies").textContent = vol.hobbies ? vol.hobbies.join(', ') : "لا توجد";
+
+    try {
+      new QRCode(canvas, {
+        text: `VOLUNTEER:${vol.id}:${vol.name}`,
+        width: 160, height: 160, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M
+      });
+    } catch(e) {}
+  }
+};
+
+window.deleteCurrentVolunteer = function() {
+  const sel = document.getElementById("volunteer-select-qr");
+  if (!sel || !sel.value) return;
+  const volId = sel.value;
+
+  if (confirm("هل تريد حذف ملف تطوعك؟")) {
+    localVolunteers = localVolunteers.filter(v => v.id !== volId);
+    saveLocalData();
+    if (useFirebase && db) db.ref("volunteers/" + volId).remove();
+    document.getElementById("qr-preview-area").style.display = "none";
+    sel.value = "";
+    updateAllUI();
+    alert("تم الحذف بنجاح.");
+  }
+};
+
+function updateCampaignSelectUI() {
+  const sel = document.getElementById("att-campaign-select");
+  if (!sel) return;
+  sel.innerHTML = `<option value="">-- اختر المبادرة --</option>`;
+  localCampaigns.filter(c => c.status === "نشطة" || c.status === "معتمدة").forEach(c => {
+    sel.innerHTML += `<option value="${c.title}">${c.title} (بلدية ${c.city})</option>`;
+  });
+}
+
+window.startCameraScanner = function() {
+  const camp = document.getElementById("att-campaign-select").value;
+  if (!camp) { alert("اختر المبادرة أولاً!"); return; }
+
+  const qrBox = document.getElementById("qr-reader");
+  qrBox.innerHTML = "";
+
+  html5QrCodeScanner = new Html5Qrcode("qr-reader");
+  html5QrCodeScanner.start({ facingMode: "environment" }, { fps: 15, qrbox: 220 }, (text) => {
+    handleQrDecoded(text);
+  }).then(() => {
+    document.getElementById("start-scanner-btn").style.display = "none";
+    document.getElementById("stop-scanner-btn").style.display = "inline-flex";
+  }).catch(() => alert("تعذر فتح الكاميرا."));
+};
+
+window.stopCameraScanner = function() {
+  if (html5QrCodeScanner) {
+    html5QrCodeScanner.stop().then(() => {
+      document.getElementById("start-scanner-btn").style.display = "inline-flex";
+      document.getElementById("stop-scanner-btn").style.display = "none";
+      document.getElementById("qr-reader").innerHTML = "";
+    }).catch(() => {});
+  }
+};
+
+window.scanQRFromFile = function(input) {
+  const camp = document.getElementById("att-campaign-select").value;
+  if (!camp) { alert("اختر المبادرة أولاً!"); input.value = ""; return; }
+  if (input.files && input.files.length > 0) {
+    const html5QrCode = new Html5Qrcode("qr-reader");
+    html5QrCode.scanFile(input.files[0], true)
+      .then(text => { handleQrDecoded(text); input.value = ""; })
+      .catch(() => { alert("تعذر قراءة الرمز."); input.value = ""; });
+  }
+};
+
+function handleQrDecoded(text) {
+  let volName = "متطوع";
+  if (text.startsWith("VOLUNTEER:")) {
+    volName = text.split(":")[2] || "متطوع";
+  }
+  recordAttendanceSuccess(volName);
+  stopCameraScanner();
+}
+
+window.recordQuickAttendance = function() {
+  const camp = document.getElementById("att-campaign-select").value;
+  if (!camp) { alert("اختر المبادرة أولاً!"); return; }
+  const volSelect = document.getElementById("quick-att-vol-select");
+  if (!volSelect.value) { alert("حدد المتطوع!"); return; }
+  const vol = localVolunteers.find(v => v.id === volSelect.value);
+  if (vol) recordAttendanceSuccess(vol.name);
+};
+
+function recordAttendanceSuccess(name) {
+  const camp = document.getElementById("att-campaign-select").value;
+  const hours = Number(document.getElementById("att-session-hours").value) || 4;
+  const entry = { volunteerName: name, campaignTitle: camp, hours: hours, timestamp: Date.now() };
+
+  localAttendance.push(entry);
+  saveLocalData();
+  if (useFirebase && db) db.ref("attendance").push(entry);
+
+  const fb = document.getElementById("scan-feedback");
+  fb.style.display = "block";
+  fb.innerHTML = `🎉 تم توثيق حضور المتطوع: <strong>${name}</strong> (+${hours} ساعات)!`;
+  updateAllUI();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  checkLoginStatus();
+  if (useFirebase) {
+    syncData();
+  }
+  updateAllUI();
+});
